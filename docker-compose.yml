@@ -1,0 +1,37 @@
+services:
+  # ── Roboflow Inference Server (GPU) ──────────────────────────
+  roboflow-inference:
+    image: roboflow/roboflow-inference-server-gpu:latest
+    container_name: roboflow-inference
+    restart: unless-stopped
+    ports:
+      - "9001:9001"
+    environment:
+      - MODEL_CACHE_DIR=/tmp/cache
+    volumes:
+      - /mnt/fast/apps/roboflow:/tmp/cache:rw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ── Camera Watcher (person detection → HomeKit) ─────────────
+  camera-watcher:
+    build: ./watcher
+    container_name: camera-watcher
+    restart: unless-stopped
+    depends_on:
+      - roboflow-inference
+    environment:
+      - RTSP_URL=${RTSP_URL}
+      - ROBOFLOW_API_URL=http://roboflow-inference:9001
+      - ROBOFLOW_API_KEY=${ROBOFLOW_API_KEY}
+      - MODEL_ID=${MODEL_ID:-yolov8n-640}
+      - HOMEBRIDGE_WEBHOOK_URL=${HOMEBRIDGE_WEBHOOK_URL}
+      - ACCESSORY_ID=${ACCESSORY_ID:-ai_person_detector}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.5}
+      - COOLDOWN_SECONDS=${COOLDOWN_SECONDS:-30}
+      - FRAME_INTERVAL=${FRAME_INTERVAL:-1.0}
