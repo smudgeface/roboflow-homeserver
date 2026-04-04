@@ -9,6 +9,7 @@ import requests
 import time
 import os
 import logging
+import threading
 from inference_sdk import InferenceHTTPClient
 
 # --- Configuration from environment ---
@@ -28,6 +29,36 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 log = logging.getLogger("watcher")
+
+
+class FrameGrabber:
+    """Continuously reads frames from an RTSP stream in a background thread,
+    so the main loop always gets the latest frame instead of stale buffered ones."""
+
+    def __init__(self, cap):
+        self._cap = cap
+        self._frame = None
+        self._ret = False
+        self._lock = threading.Lock()
+        self._stopped = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while not self._stopped:
+            ret, frame = self._cap.read()
+            with self._lock:
+                self._ret = ret
+                self._frame = frame
+            if not ret:
+                break
+
+    def read(self):
+        with self._lock:
+            return self._ret, self._frame
+
+    def stop(self):
+        self._stopped = True
 
 
 def create_client():
@@ -76,11 +107,16 @@ def run():
             continue
 
         log.info("Stream connected. Running detection loop.")
+        grabber = FrameGrabber(cap)
         consecutive_errors = 0
 
         while True:
-            ret, frame = cap.read()
+            ret, frame = grabber.read()
             if not ret:
+                if frame is None and consecutive_errors == 0:
+                    # Grabber hasn't read a frame yet, wait briefly
+                    time.sleep(0.1)
+                    continue
                 log.warning("Lost stream frame. Reconnecting...")
                 break
 
@@ -112,6 +148,7 @@ def run():
 
             time.sleep(FRAME_INTERVAL)
 
+        grabber.stop()
         cap.release()
         time.sleep(RECONNECT_DELAY)
 

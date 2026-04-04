@@ -25,6 +25,9 @@ services:
     restart: unless-stopped
     depends_on:
       - roboflow-inference
+    networks:
+      - default
+      - homebridge_net
     environment:
       - RTSP_URL=rtsp://192.168.20.1:7447/YOUR_CAMERA_TOKEN
       - ROBOFLOW_API_URL=http://roboflow-inference:9001
@@ -35,3 +38,11 @@ services:
       - CONFIDENCE_THRESHOLD=0.5
       - COOLDOWN_SECONDS=30
       - FRAME_INTERVAL=1.0
+
+# Camera-watcher must join the Homebridge macvlan network to reach it.
+# TrueNAS macvlan containers are isolated from the host, so direct
+# host-to-container communication doesn't work.
+networks:
+  homebridge_net:
+    external: true
+    name: ix-homebridge_homebridge_net

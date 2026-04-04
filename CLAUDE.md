@@ -10,7 +10,7 @@ See [README.md](README.md) for project overview, architecture, configuration, an
 | Roboflow Inference API | 192.168.20.10 | 9001 | GPU container |
 | UniFi NVR (RTSP) | 192.168.20.1 | 7447 | Unencrypted local streams |
 | Homebridge UI | 192.168.20.4 | 8581 | Web management interface |
-| Homebridge Webhooks | 192.168.20.4 | 51828 | `homebridge-http-webhooks` plugin (CONFIRM port in plugin config — 8581 is the UI, not webhooks) |
+| Homebridge Webhooks | 192.168.20.4 | 51828 | `homebridge-http-webhooks` plugin (default port, confirmed working) |
 
 - **RTSP URL format:** `rtsp://192.168.20.1:7447/<token>` (per-camera tokens from UniFi)
 - **Homebridge sensor:** `ai_person_detector` — virtual motion sensor triggered via HTTP GET
@@ -21,7 +21,7 @@ See [README.md](README.md) for project overview, architecture, configuration, an
 - **Camera Watcher:** CPU-only Docker container (this project's `watcher/` directory)
 - **OpenClaw (AI Agent):** CPU-only Ubuntu VM on TrueNAS — sandboxed, uses cloud LLMs only
 - **Plex:** Native TrueNAS app using Intel iGPU
-- **Homebridge:** Separate device (192.168.20.4), plugin `homebridge-http-webhooks`
+- **Homebridge:** Macvlan container on TrueNAS (192.168.20.4), plugin `homebridge-http-webhooks`. Camera-watcher must join `ix-homebridge_homebridge_net` network to reach it (macvlan host isolation).
 
 ## Design Principles
 
@@ -38,8 +38,8 @@ See [README.md](README.md) for project overview, architecture, configuration, an
 - [x] Homebridge virtual motion sensor configured (`ai_person_detector`)
 - [x] Camera watcher script and Docker setup created
 - [x] GitHub repo, CI pipeline, and TrueNAS app YAML created
-- [ ] Deploy watcher container to TrueNAS
-- [ ] Verify Homebridge webhook port (51828 vs 8581)
-- [ ] Test end-to-end: camera → detection → phone notification
+- [x] Deploy watcher container to TrueNAS (via "Install via YAML" custom app)
+- [x] Verify Homebridge webhook port (51828 confirmed)
+- [x] Test end-to-end: camera → detection → phone notification
 - [ ] Multi-camera support
 - [ ] Custom model training via Roboflow
