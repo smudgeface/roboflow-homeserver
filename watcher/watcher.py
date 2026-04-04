@@ -9,7 +9,6 @@ import requests
 import time
 import os
 import logging
-import threading
 from inference_sdk import InferenceHTTPClient
 
 # --- Configuration from environment ---
@@ -31,34 +30,25 @@ logging.basicConfig(
 log = logging.getLogger("watcher")
 
 
-class FrameGrabber:
-    """Continuously reads frames from an RTSP stream in a background thread,
-    so the main loop always gets the latest frame instead of stale buffered ones."""
+def open_stream():
+    """Open RTSP stream with low-latency FFmpeg options."""
+    cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG, [
+        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000,
+        cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000,
+    ])
+    return cap
 
-    def __init__(self, cap):
-        self._cap = cap
-        self._frame = None
-        self._ret = False
-        self._lock = threading.Lock()
-        self._stopped = False
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
 
-    def _run(self):
-        while not self._stopped:
-            ret, frame = self._cap.read()
-            with self._lock:
-                self._ret = ret
-                self._frame = frame
-            if not ret:
-                break
-
-    def read(self):
-        with self._lock:
-            return self._ret, self._frame
-
-    def stop(self):
-        self._stopped = True
+def grab_latest_frame(cap):
+    """Drain the OpenCV buffer and return only the most recent frame.
+    Uses grab() to skip buffered frames quickly without decoding them,
+    then retrieve() to decode only the last one."""
+    # Grab (but don't decode) frames to drain the buffer
+    for _ in range(30):
+        if not cap.grab():
+            return False, None
+    # Decode only the final frame
+    return cap.retrieve()
 
 
 def create_client():
@@ -99,7 +89,7 @@ def run():
 
     while True:
         log.info("Connecting to RTSP stream...")
-        cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
+        cap = open_stream()
 
         if not cap.isOpened():
             log.error("Failed to open stream. Retrying in %ds...", RECONNECT_DELAY)
@@ -107,14 +97,10 @@ def run():
             continue
 
         log.info("Stream connected. Running detection loop.")
-        grabber = FrameGrabber(cap)
         consecutive_errors = 0
 
-        # Give the grabber a moment to read the first frame
-        time.sleep(1)
-
         while True:
-            ret, frame = grabber.read()
+            ret, frame = grab_latest_frame(cap)
             if not ret or frame is None:
                 log.warning("Lost stream frame. Reconnecting...")
                 break
@@ -147,7 +133,6 @@ def run():
 
             time.sleep(FRAME_INTERVAL)
 
-        grabber.stop()
         cap.release()
         time.sleep(RECONNECT_DELAY)
 
