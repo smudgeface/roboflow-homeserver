@@ -110,13 +110,12 @@ def run():
         grabber = FrameGrabber(cap)
         consecutive_errors = 0
 
+        # Give the grabber a moment to read the first frame
+        time.sleep(1)
+
         while True:
             ret, frame = grabber.read()
-            if not ret:
-                if frame is None and consecutive_errors == 0:
-                    # Grabber hasn't read a frame yet, wait briefly
-                    time.sleep(0.1)
-                    continue
+            if not ret or frame is None:
                 log.warning("Lost stream frame. Reconnecting...")
                 break
 
