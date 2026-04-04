@@ -9,6 +9,7 @@ import requests
 import time
 import os
 import logging
+import threading
 from inference_sdk import InferenceHTTPClient
 
 # --- Configuration from environment ---
@@ -30,25 +31,39 @@ logging.basicConfig(
 log = logging.getLogger("watcher")
 
 
-def open_stream():
-    """Open RTSP stream with low-latency FFmpeg options."""
-    cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG, [
-        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000,
-        cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000,
-    ])
-    return cap
+class FrameGrabber:
+    """Continuously reads frames from an RTSP stream in a background thread,
+    so the main loop always gets the latest frame instead of stale buffered ones."""
 
+    def __init__(self, rtsp_url):
+        self._cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        self._frame = None
+        self._ret = False
+        self._lock = threading.Lock()
+        self._stopped = False
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
 
-def grab_latest_frame(cap):
-    """Drain the OpenCV buffer and return only the most recent frame.
-    Uses grab() to skip buffered frames quickly without decoding them,
-    then retrieve() to decode only the last one."""
-    # Grab (but don't decode) frames to drain the buffer
-    for _ in range(30):
-        if not cap.grab():
-            return False, None
-    # Decode only the final frame
-    return cap.retrieve()
+    def _run(self):
+        while not self._stopped:
+            ret, frame = self._cap.read()
+            with self._lock:
+                self._ret = ret
+                self._frame = frame
+            if not ret:
+                break
+
+    def read(self):
+        with self._lock:
+            return self._ret, (self._frame.copy() if self._frame is not None else None)
+
+    def is_alive(self):
+        return self._thread.is_alive()
+
+    def release(self):
+        self._stopped = True
+        self._thread.join(timeout=5)
+        self._cap.release()
 
 
 def create_client():
@@ -89,10 +104,25 @@ def run():
 
     while True:
         log.info("Connecting to RTSP stream...")
-        cap = open_stream()
+        grabber = FrameGrabber(RTSP_URL)
 
-        if not cap.isOpened():
+        # Wait for the grabber to read the first frame
+        for _ in range(50):
+            ret, frame = grabber.read()
+            if ret and frame is not None:
+                break
+            if not grabber.is_alive():
+                break
+            time.sleep(0.1)
+        else:
+            log.error("Failed to get first frame. Retrying in %ds...", RECONNECT_DELAY)
+            grabber.release()
+            time.sleep(RECONNECT_DELAY)
+            continue
+
+        if not ret or frame is None:
             log.error("Failed to open stream. Retrying in %ds...", RECONNECT_DELAY)
+            grabber.release()
             time.sleep(RECONNECT_DELAY)
             continue
 
@@ -100,8 +130,8 @@ def run():
         consecutive_errors = 0
 
         while True:
-            ret, frame = grab_latest_frame(cap)
-            if not ret or frame is None:
+            ret, frame = grabber.read()
+            if not ret or frame is None or not grabber.is_alive():
                 log.warning("Lost stream frame. Reconnecting...")
                 break
 
@@ -133,7 +163,7 @@ def run():
 
             time.sleep(FRAME_INTERVAL)
 
-        cap.release()
+        grabber.release()
         time.sleep(RECONNECT_DELAY)
 
 
