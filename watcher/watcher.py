@@ -46,13 +46,20 @@ class FrameGrabber:
         self._thread.start()
 
     def _run(self):
+        frames_read = 0
         while not self._stopped:
             ret, frame = self._cap.read()
             with self._lock:
                 self._ret = ret
                 self._frame = frame
             if not ret:
+                log.warning("Grabber thread: stream ended after %d frames", frames_read)
                 break
+            frames_read += 1
+            if frames_read == 1:
+                log.info("Grabber thread: first frame received")
+            elif frames_read % 300 == 0:
+                log.info("Grabber thread: %d frames read", frames_read)
 
     def read(self):
         with self._lock:
