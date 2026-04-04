@@ -32,8 +32,9 @@ log = logging.getLogger("watcher")
 
 
 class FrameGrabber:
-    """Continuously reads frames from an RTSP stream in a background thread,
-    so the main loop always gets the latest frame instead of stale buffered ones."""
+    """Continuously reads frames from an RTSP stream in a background thread.
+    The main loop always gets the latest frame instead of stale buffered ones.
+    The thread keeps the RTSP connection alive by consuming frames continuously."""
 
     def __init__(self, rtsp_url):
         self._cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
@@ -56,6 +57,9 @@ class FrameGrabber:
     def read(self):
         with self._lock:
             return self._ret, (self._frame.copy() if self._frame is not None else None)
+
+    def is_opened(self):
+        return self._cap.isOpened()
 
     def is_alive(self):
         return self._thread.is_alive()
@@ -106,6 +110,12 @@ def run():
         log.info("Connecting to RTSP stream...")
         grabber = FrameGrabber(RTSP_URL)
 
+        if not grabber.is_opened():
+            log.error("Failed to open stream. Retrying in %ds...", RECONNECT_DELAY)
+            grabber.release()
+            time.sleep(RECONNECT_DELAY)
+            continue
+
         # Wait for the grabber to read the first frame
         for _ in range(50):
             ret, frame = grabber.read()
@@ -114,14 +124,9 @@ def run():
             if not grabber.is_alive():
                 break
             time.sleep(0.1)
-        else:
-            log.error("Failed to get first frame. Retrying in %ds...", RECONNECT_DELAY)
-            grabber.release()
-            time.sleep(RECONNECT_DELAY)
-            continue
 
         if not ret or frame is None:
-            log.error("Failed to open stream. Retrying in %ds...", RECONNECT_DELAY)
+            log.error("No frames received. Retrying in %ds...", RECONNECT_DELAY)
             grabber.release()
             time.sleep(RECONNECT_DELAY)
             continue
