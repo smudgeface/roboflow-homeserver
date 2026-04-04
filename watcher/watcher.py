@@ -37,6 +37,8 @@ class FrameGrabber:
     The thread keeps the RTSP connection alive by consuming frames continuously."""
 
     def __init__(self, rtsp_url):
+        # Force RTSP over TCP to avoid UDP packet loss in container networks
+        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
         self._cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
         self._frame = None
         self._ret = False
@@ -49,12 +51,12 @@ class FrameGrabber:
         frames_read = 0
         while not self._stopped:
             ret, frame = self._cap.read()
-            with self._lock:
-                self._ret = ret
-                self._frame = frame
             if not ret:
                 log.warning("Grabber thread: stream ended after %d frames", frames_read)
                 break
+            with self._lock:
+                self._ret = ret
+                self._frame = frame
             frames_read += 1
             if frames_read == 1:
                 log.info("Grabber thread: first frame received")
